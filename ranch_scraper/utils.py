@@ -161,9 +161,9 @@ def format_table_output(data: List[Dict[str, str]], max_width: int = 80) -> str:
     if not data:
         return "No data to display"
     
-    # Get column headers from first row, excluding internal HTML fields
+    # Get column headers from first row, excluding internal HTML fields and complex objects
     headers = list(data[0].keys())
-    display_headers = [h for h in headers if h != 'member_id_html']
+    display_headers = [h for h in headers if h not in ['member_id_html', 'addresses', 'phones', 'contacts']]
     
     # Calculate column widths
     col_widths = {}

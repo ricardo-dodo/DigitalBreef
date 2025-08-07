@@ -377,12 +377,196 @@ Examples:
                     print(f"DBA: {profile_details.get('dba', 'N/A')}")
                     print(f"Herd Prefix: {profile_details.get('herd_prefix', 'N/A')}")
                     
+                    # Extract member ID for tab clicks
+                    member_id_match = re.search(r'member_id=(\d+)', profile_url)
+                    if member_id_match:
+                        member_id_num = member_id_match.group(1)
+                        
+                        # Get Addresses information
+                        print(f"\n=== Addresses ===")
+                        addresses = await self._get_addresses(page, member_id_num)
+                        if addresses:
+                            for i, addr in enumerate(addresses, 1):
+                                print(f"Address {i}:")
+                                print(f"  Type: {addr.get('type', 'N/A')}")
+                                print(f"  Street: {addr.get('street', 'N/A')}")
+                                print(f"  City: {addr.get('city', 'N/A')}")
+                                print(f"  State: {addr.get('state', 'N/A')}")
+                                print(f"  Postal Code: {addr.get('postal_code', 'N/A')}")
+                                print(f"  Country: {addr.get('country', 'N/A')}")
+                                print(f"  Email: {addr.get('email', 'N/A')}")
+                        else:
+                            print("No addresses found.")
+                        
+                        # Get Phones information
+                        print(f"\n=== Phones ===")
+                        phones = await self._get_phones(page, member_id_num)
+                        if phones:
+                            for i, phone in enumerate(phones, 1):
+                                print(f"Phone {i}:")
+                                print(f"  Type: {phone.get('type', 'N/A')}")
+                                print(f"  Country Code: {phone.get('country_code', 'N/A')}")
+                                print(f"  Area Code: {phone.get('area_code', 'N/A')}")
+                                print(f"  Prefix: {phone.get('prefix', 'N/A')}")
+                                print(f"  Suffix: {phone.get('suffix', 'N/A')}")
+                                print(f"  Extension: {phone.get('extension', 'N/A')}")
+                                print(f"  Full Number: {phone.get('full_number', 'N/A')}")
+                        else:
+                            print("No phones found.")
+                        
+                        # Get Contacts information
+                        print(f"\n=== Contacts ===")
+                        contacts = await self._get_contacts(page, member_id_num)
+                        if contacts:
+                            for i, contact in enumerate(contacts, 1):
+                                print(f"Contact {i}:")
+                                print(f"  Job/Position: {contact.get('job_title', 'N/A')}")
+                                print(f"  Name: {contact.get('name', 'N/A')}")
+                                print(f"  Nickname: {contact.get('nickname', 'N/A')}")
+                                print(f"  Email: {contact.get('email', 'N/A')}")
+                                print(f"  Phone: {contact.get('phone', 'N/A')}")
+                                print(f"  Address: {contact.get('address', 'N/A')}")
+                        else:
+                            print("No contacts found.")
+                    
                 except Exception as e:
                     print(f"Error fetching profile details: {e}")
             else:
                 print("Could not extract profile URL.")
         else:
             print("No profile link found for this member.")
+    
+    async def _get_addresses(self, page, member_id):
+        """Get addresses information by clicking the Addresses tab"""
+        try:
+            # Click on Addresses tab
+            await page.click('#tab-bg\\:2')
+            await page.wait_for_selector('#ajax_ranch_canvass table', timeout=10000)
+            
+            # Extract addresses data
+            addresses = await page.evaluate("""
+                () => {
+                    const table = document.querySelector('#ajax_ranch_canvass table');
+                    if (!table) return [];
+                    
+                    const rows = table.querySelectorAll('tr');
+                    const addresses = [];
+                    
+                    for (let i = 1; i < rows.length; i++) { // Skip header row
+                        const cells = rows[i].querySelectorAll('td');
+                        if (cells.length >= 8) {
+                            const address = {
+                                type: cells[0].textContent.trim(),
+                                street: cells[1].textContent.trim(),
+                                city: cells[2].textContent.trim(),
+                                state: cells[3].textContent.trim(),
+                                postal_code: cells[4].textContent.trim(),
+                                country: cells[5].textContent.trim(),
+                                premise_id: cells[6].textContent.trim(),
+                                email: cells[7].textContent.trim()
+                            };
+                            addresses.push(address);
+                        }
+                    }
+                    
+                    return addresses;
+                }
+            """)
+            
+            return addresses
+            
+        except Exception as e:
+            print(f"Error getting addresses: {e}")
+            return []
+    
+    async def _get_phones(self, page, member_id):
+        """Get phones information by clicking the Phones tab"""
+        try:
+            # Click on Phones tab
+            await page.click('#tab-bg\\:3')
+            await page.wait_for_selector('#ajax_ranch_canvass table', timeout=10000)
+            
+            # Extract phones data
+            phones = await page.evaluate("""
+                () => {
+                    const table = document.querySelector('#ajax_ranch_canvass table');
+                    if (!table) return [];
+                    
+                    const rows = table.querySelectorAll('tr');
+                    const phones = [];
+                    
+                    for (let i = 1; i < rows.length; i++) { // Skip header row
+                        const cells = rows[i].querySelectorAll('td');
+                        if (cells.length >= 6) {
+                            const countryCode = cells[1].textContent.trim();
+                            const areaCode = cells[2].textContent.trim();
+                            const prefix = cells[3].textContent.trim();
+                            const suffix = cells[4].textContent.trim();
+                            const extension = cells[5].textContent.trim();
+                            
+                            const phone = {
+                                type: cells[0].textContent.trim(),
+                                country_code: countryCode,
+                                area_code: areaCode,
+                                prefix: prefix,
+                                suffix: suffix,
+                                extension: extension,
+                                full_number: `${countryCode}${areaCode}${prefix}${suffix}${extension}`.replace(/\\s+/g, '')
+                            };
+                            phones.push(phone);
+                        }
+                    }
+                    
+                    return phones;
+                }
+            """)
+            
+            return phones
+            
+        except Exception as e:
+            print(f"Error getting phones: {e}")
+            return []
+    
+    async def _get_contacts(self, page, member_id):
+        """Get contacts information by clicking the Contacts tab"""
+        try:
+            # Click on Contacts tab
+            await page.click('#tab-bg\\:1')
+            await page.wait_for_selector('#ajax_ranch_canvass table', timeout=10000)
+            
+            # Extract contacts data
+            contacts = await page.evaluate("""
+                () => {
+                    const table = document.querySelector('#ajax_ranch_canvass table');
+                    if (!table) return [];
+                    
+                    const rows = table.querySelectorAll('tr');
+                    const contacts = [];
+                    
+                    for (let i = 1; i < rows.length; i++) { // Skip header row
+                        const cells = rows[i].querySelectorAll('td');
+                        if (cells.length >= 7) {
+                            const contact = {
+                                job_title: cells[1].textContent.trim(),
+                                name: cells[2].textContent.trim(),
+                                nickname: cells[3].textContent.trim(),
+                                email: cells[4].textContent.trim(),
+                                phone: cells[5].textContent.trim(),
+                                address: cells[6].textContent.trim()
+                            };
+                            contacts.push(contact);
+                        }
+                    }
+                    
+                    return contacts;
+                }
+            """)
+            
+            return contacts
+            
+        except Exception as e:
+            print(f"Error getting contacts: {e}")
+            return []
     
     async def _view_single_member_detail(self, data, page):
         """View detailed information for a single member"""
@@ -443,6 +627,22 @@ Examples:
                         from .utils import parse_profile_table
                         profile_details = await parse_profile_table(page)
                         
+                        # Extract member ID for tab clicks
+                        import re
+                        member_id_match = re.search(r'member_id=(\d+)', profile_url)
+                        if member_id_match:
+                            member_id_num = member_id_match.group(1)
+                            
+                            # Get additional details from all tabs
+                            addresses = await self._get_addresses(page, member_id_num)
+                            phones = await self._get_phones(page, member_id_num)
+                            contacts = await self._get_contacts(page, member_id_num)
+                            
+                            # Add addresses, phones, and contacts to profile details
+                            profile_details['addresses'] = addresses
+                            profile_details['phones'] = phones
+                            profile_details['contacts'] = contacts
+                        
                         # Merge profile details with member data
                         enriched_member = member.copy()
                         enriched_member.update(profile_details)
@@ -453,6 +653,12 @@ Examples:
                         
                         enriched_results.append(enriched_member)
                         print(f"  ✓ Enriched: {profile_details.get('breeder_type', 'N/A')} - {profile_details.get('profile_type', 'N/A')}")
+                        if addresses:
+                            print(f"    Addresses: {len(addresses)} found")
+                        if phones:
+                            print(f"    Phones: {len(phones)} found")
+                        if contacts:
+                            print(f"    Contacts: {len(contacts)} found")
                         
                     except Exception as e:
                         print(f"  ✗ Error: {e}")
@@ -464,7 +670,10 @@ Examples:
                             'profile_id': '',
                             'profile_name': '',
                             'dba': '',
-                            'herd_prefix': ''
+                            'herd_prefix': '',
+                            'addresses': [],
+                            'phones': [],
+                            'contacts': []
                         })
                         enriched_results.append(enriched_member)
                 else:
@@ -478,6 +687,26 @@ Examples:
         
         # Display enriched results
         print("\n" + self.scraper.format_results(enriched_results))
+        
+        # Display summary of additional data
+        print("\n=== Additional Data Summary ===")
+        total_addresses = sum(len(member.get('addresses', [])) for member in enriched_results)
+        total_phones = sum(len(member.get('phones', [])) for member in enriched_results)
+        total_contacts = sum(len(member.get('contacts', [])) for member in enriched_results)
+        
+        print(f"Total Addresses found: {total_addresses}")
+        print(f"Total Phones found: {total_phones}")
+        print(f"Total Contacts found: {total_contacts}")
+        
+        # Show detailed breakdown
+        print("\n=== Detailed Breakdown ===")
+        for i, member in enumerate(enriched_results, 1):
+            member_id = member.get('member_id', 'Unknown')
+            addresses_count = len(member.get('addresses', []))
+            phones_count = len(member.get('phones', []))
+            contacts_count = len(member.get('contacts', []))
+            
+            print(f"{i}. {member_id}: {addresses_count} addresses, {phones_count} phones, {contacts_count} contacts")
         
         # Ask if user wants to export enriched results
         while True:
