@@ -243,18 +243,59 @@ Examples:
             # Display results
             print("\n" + self.scraper.format_results(results))
             
-            # Export if requested
-            if export_format:
-                if filename:
-                    exported_file = self.exporter.export_data(results, export_format, filename)
-                else:
-                    exported_file = self.exporter.export_data(results, export_format)
-                
-                if exported_file:
-                    print(f"Results exported to: {exported_file}")
+            # Show follow-up options menu
+            await self._show_follow_up_menu(results)
                     
         except Exception as e:
             print(f"Error in ranch scraper: {e}")
+    
+    async def _show_follow_up_menu(self, data):
+        """Show follow-up options menu after displaying results"""
+        while True:
+            print("\nWhat would you like to do next?")
+            print("1. Export results to CSV")
+            print("2. Export results to JSON")
+            print("3. View a member's full detail (coming soon)")
+            print("4. Return to main menu")
+            
+            try:
+                choice = input("\nEnter your choice (1-4): ").strip()
+                
+                if choice == "1":
+                    filename = input("Enter CSV filename (or press Enter for 'ranch_results.csv'): ").strip()
+                    if not filename:
+                        filename = "ranch_results.csv"
+                    exported_file = self.exporter.export_to_csv(data, filename)
+                    if exported_file:
+                        print(f"Results exported to: {exported_file}")
+                    break
+                    
+                elif choice == "2":
+                    filename = input("Enter JSON filename (or press Enter for 'ranch_results.json'): ").strip()
+                    if not filename:
+                        filename = "ranch_results.json"
+                    exported_file = self.exporter.export_to_json(data, filename)
+                    if exported_file:
+                        print(f"Results exported to: {exported_file}")
+                    break
+                    
+                elif choice == "3":
+                    print("Feature to view full member details is coming soon.")
+                    break
+                    
+                elif choice == "4":
+                    print("Returning to main menu...")
+                    break
+                    
+                else:
+                    print("Invalid choice. Please enter 1, 2, 3, or 4.")
+                    
+            except KeyboardInterrupt:
+                print("\nOperation cancelled.")
+                break
+            except Exception as e:
+                print(f"Error: {e}")
+                break
 
 
 async def main():

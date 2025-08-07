@@ -211,7 +211,5 @@ class InteractivePrompt:
             print("\nNo search parameters provided. Exiting.")
             return {}, None, None
         
-        # Collect export preferences
-        export_format, filename = await self.prompt_for_export()
-        
-        return params, export_format, filename 
+        # No longer collect export preferences here - they will be handled in the follow-up menu
+        return params, None, None 

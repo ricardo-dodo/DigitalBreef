@@ -163,18 +163,15 @@ class DynamicScraper:
             if button_info.get('hasFunction'):
                 # Use JavaScript function if available
                 await page.evaluate("doSearch_Ranch()")
-                print("Search triggered via JavaScript function")
             elif button_info.get('button'):
                 # Use button click
                 button_selector = button_info['button']['selector']
                 await page.click(button_selector)
-                print("Search triggered via button click")
             else:
                 # Fallback: look for search button
                 search_button = await page.query_selector('input[name="btnsubmit"][value="Search..."]')
                 if search_button:
                     await search_button.click()
-                    print("Search triggered via fallback button")
                 else:
                     print("Error: No search button found")
                     return False
