@@ -42,7 +42,7 @@ class FormParser:
                     return options.map(option => ({{
                         value: option.value,
                         text: option.text.trim()
-                    }}));
+                    }})).filter(option => option.value && option.value.trim() !== '|');
                 }}
             """)
             
@@ -191,24 +191,31 @@ class FormParser:
         # Normalize user input
         user_input = user_input.strip().upper()
         
+        # Skip empty options
+        valid_options = [opt for opt in options if opt['value'].strip() and opt['value'].strip() != '|']
+        
         # Try exact value match first
-        for option in options:
+        for option in valid_options:
             if option['value'].strip().upper() == user_input:
                 return option['value']
         
-        # Try partial text match
-        for option in options:
+        # Try partial text match in option text
+        for option in valid_options:
             option_text = option['text'].upper()
-            if user_input in option_text or option_text in user_input:
+            if user_input in option_text:
                 return option['value']
         
-        # Try state code extraction
-        if '|' in user_input:
-            country, state = user_input.split('|', 1)
-            state = state.strip()
-            for option in options:
-                if state in option['value']:
-                    return option['value']
+        # Try state code extraction from option value
+        for option in valid_options:
+            option_value = option['value'].upper()
+            if user_input in option_value:
+                return option['value']
+        
+        # Try state code extraction from option text
+        for option in valid_options:
+            option_text = option['text'].upper()
+            if user_input in option_text:
+                return option['value']
         
         return None
     

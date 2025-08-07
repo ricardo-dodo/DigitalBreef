@@ -86,19 +86,35 @@ class InteractivePrompt:
         if not user_input:
             return None
         
-        # Validate location input
+        # Handle location input with number selection
         if field_id == 'search-member-location' and page:
-            is_valid, mapped_value = await self.validate_location_input(page, user_input)
-            if not is_valid:
-                print(f"⚠️  Warning: '{user_input}' not found in available locations")
-                retry = input("Try again? (y/n): ").strip().lower()
-                if retry == 'y':
-                    return await self.prompt_for_field(field_name, field_id, page)
+            # Check if user entered a number
+            try:
+                location_num = int(user_input)
+                if 1 <= location_num <= len(options):
+                    selected_option = options[location_num - 1]
+                    print(f"✓ Selected: {selected_option['text']} ({selected_option['value']})")
+                    return selected_option['value']
                 else:
-                    return None
-            elif mapped_value:
-                print(f"✓ Selected: {mapped_value}")
-                return mapped_value
+                    print(f"⚠️  Warning: Number {location_num} is out of range (1-{len(options)})")
+                    retry = input("Try again? (y/n): ").strip().lower()
+                    if retry == 'y':
+                        return await self.prompt_for_field(field_name, field_id, page)
+                    else:
+                        return None
+            except ValueError:
+                # Not a number, try text matching
+                is_valid, mapped_value = await self.validate_location_input(page, user_input)
+                if not is_valid:
+                    print(f"⚠️  Warning: '{user_input}' not found in available locations")
+                    retry = input("Try again? (y/n): ").strip().lower()
+                    if retry == 'y':
+                        return await self.prompt_for_field(field_name, field_id, page)
+                    else:
+                        return None
+                elif mapped_value:
+                    print(f"✓ Selected: {mapped_value}")
+                    return mapped_value
         
         return user_input.upper() if field_id != 'search-member-location' else user_input
     
@@ -153,7 +169,7 @@ class InteractivePrompt:
                 if not filename:
                     filename = None
                 return export_choice, filename
-            elif export_choice == 'none':
+            elif export_choice in ['none', 'skip']:
                 return None, None
             else:
                 print("Invalid choice. Please enter 'csv', 'json', or 'none'.")

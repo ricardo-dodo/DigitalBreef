@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import sys
 from typing import Dict, List, Optional
+from playwright.async_api import Page
 from .scraper import DynamicScraper
 from .exporter import DynamicExporter
 from .utils import validate_search_params, parse_location_input, sanitize_filename
@@ -212,6 +213,48 @@ Examples:
         
         # Run the scraper
         await self.run_scraper(search_params, args.export, args.output)
+    
+    async def main_with_page(self, page: Page):
+        """Main entry point for use with existing page object"""
+        try:
+            # Wait for form to be ready
+            if not await self.scraper.wait_for_form_ready(page):
+                print("Failed to load search form")
+                return
+            
+            # Run interactive mode since we have a page
+            from .interactive_prompt import InteractivePrompt
+            interactive_prompt = InteractivePrompt()
+            
+            # Run interactive prompt
+            params, export_format, filename = await interactive_prompt.run_interactive_mode(page)
+            
+            if not params:
+                print("No search parameters provided. Exiting.")
+                return
+            
+            # Run the scraper with collected parameters
+            results = await self.scraper.scrape_ranches(params)
+            
+            if not results:
+                print("No results found")
+                return
+            
+            # Display results
+            print("\n" + self.scraper.format_results(results))
+            
+            # Export if requested
+            if export_format:
+                if filename:
+                    exported_file = self.exporter.export_data(results, export_format, filename)
+                else:
+                    exported_file = self.exporter.export_data(results, export_format)
+                
+                if exported_file:
+                    print(f"Results exported to: {exported_file}")
+                    
+        except Exception as e:
+            print(f"Error in ranch scraper: {e}")
 
 
 async def main():
