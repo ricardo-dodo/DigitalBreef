@@ -240,22 +240,22 @@ Examples:
                 print("No results found")
                 return
             
-            # Display results
+            # Display original results
             print("\n" + self.scraper.format_results(results))
             
             # Show follow-up options menu
-            await self._show_follow_up_menu(results)
+            await self._show_follow_up_menu(results, page)
                     
         except Exception as e:
             print(f"Error in ranch scraper: {e}")
     
-    async def _show_follow_up_menu(self, data):
+    async def _show_follow_up_menu(self, data, page):
         """Show follow-up options menu after displaying results"""
         while True:
             print("\nWhat would you like to do next?")
             print("1. Export results to CSV")
             print("2. Export results to JSON")
-            print("3. View a member's full detail (coming soon)")
+            print("3. View a member's full detail")
             print("4. Return to main menu")
             
             try:
@@ -280,7 +280,7 @@ Examples:
                     break
                     
                 elif choice == "3":
-                    print("Feature to view full member details is coming soon.")
+                    await self._view_member_detail(data, page)
                     break
                     
                 elif choice == "4":
@@ -289,6 +289,235 @@ Examples:
                     
                 else:
                     print("Invalid choice. Please enter 1, 2, 3, or 4.")
+                    
+            except KeyboardInterrupt:
+                print("\nOperation cancelled.")
+                break
+            except Exception as e:
+                print(f"Error: {e}")
+                break
+    
+    async def _view_member_detail(self, data, page):
+        """View detailed information for a specific member"""
+        if not data:
+            print("No data available to view details.")
+            return
+        
+        print(f"\nAvailable members ({len(data)} total):")
+        for i, member in enumerate(data, 1):
+            member_id = member.get('member_id', member.get('Member ID', 'Unknown'))
+            member_name = member.get('member_name', member.get('Member Name', 'Unknown'))
+            print(f"{i}. {member_id} - {member_name}")
+        
+        print(f"\nView options:")
+        print("1. View one member detail")
+        print("2. View all members detail")
+        print("3. Return to main menu")
+        
+        while True:
+            try:
+                choice = input(f"\nEnter your choice (1-3): ").strip()
+                
+                if choice == "1":
+                    await self._view_single_member_detail(data, page)
+                    break
+                elif choice == "2":
+                    await self._view_all_members_detail(data, page)
+                    break
+                elif choice == "3":
+                    print("Returning to main menu...")
+                    break
+                else:
+                    print("Invalid choice. Please enter 1, 2, or 3.")
+                    
+            except KeyboardInterrupt:
+                print("\nOperation cancelled.")
+                break
+            except Exception as e:
+                print(f"Error: {e}")
+                break
+    
+    async def _show_member_detail(self, member, page):
+        """Show detailed information for a specific member"""
+        print(f"\n=== Member Detail ===")
+        print(f"Member ID: {member.get('member_id', 'N/A')}")
+        print(f"Member Name: {member.get('member_name', 'N/A')}")
+        print(f"Herd Prefix: {member.get('herd_prefix', 'N/A')}")
+        print(f"DBA: {member.get('dba', 'N/A')}")
+        print(f"City: {member.get('city', 'N/A')}")
+        print(f"State: {member.get('state', 'N/A')}")
+        
+        # Extract member ID HTML for URL
+        member_id_html = member.get('member_id_html', member.get('member_id', ''))
+        if not member_id_html:
+            print("No member ID found for detail view.")
+            return
+        
+        # Extract URL from HTML
+        if '<a href=' in member_id_html:
+            import re
+            url_match = re.search(r'href="([^"]+)"', member_id_html)
+            if url_match:
+                profile_url = url_match.group(1).replace('&amp;', '&')
+                
+                print(f"\nFetching detailed profile information...")
+                try:
+                    # Navigate to profile page
+                    await page.goto(profile_url, wait_until='networkidle', timeout=15000)
+                    
+                    # Parse profile details
+                    from .utils import parse_profile_table
+                    profile_details = await parse_profile_table(page)
+                    
+                    print(f"\n=== Profile Details ===")
+                    print(f"Breeder Type: {profile_details.get('breeder_type', 'N/A')}")
+                    print(f"Profile Type: {profile_details.get('profile_type', 'N/A')}")
+                    print(f"Official Profile ID: {profile_details.get('profile_id', 'N/A')}")
+                    print(f"Official Profile Name: {profile_details.get('profile_name', 'N/A')}")
+                    print(f"DBA: {profile_details.get('dba', 'N/A')}")
+                    print(f"Herd Prefix: {profile_details.get('herd_prefix', 'N/A')}")
+                    
+                except Exception as e:
+                    print(f"Error fetching profile details: {e}")
+            else:
+                print("Could not extract profile URL.")
+        else:
+            print("No profile link found for this member.")
+    
+    async def _view_single_member_detail(self, data, page):
+        """View detailed information for a single member"""
+        while True:
+            try:
+                choice = input(f"\nEnter member number (1-{len(data)}) or 'q' to quit: ").strip()
+                
+                if choice.lower() == 'q':
+                    print("Returning to main menu...")
+                    break
+                
+                try:
+                    member_index = int(choice) - 1
+                    if 0 <= member_index < len(data):
+                        selected_member = data[member_index]
+                        await self._show_member_detail(selected_member, page)
+                        break
+                    else:
+                        print(f"Invalid choice. Please enter a number between 1 and {len(data)}.")
+                except ValueError:
+                    print("Invalid input. Please enter a number or 'q' to quit.")
+                    
+            except KeyboardInterrupt:
+                print("\nOperation cancelled.")
+                break
+            except Exception as e:
+                print(f"Error: {e}")
+                break
+    
+    async def _view_all_members_detail(self, data, page):
+        """View detailed information for all members"""
+        print(f"\nFetching details for all {len(data)} members...")
+        
+        enriched_results = []
+        
+        for i, member in enumerate(data, 1):
+            print(f"\nProcessing member {i}/{len(data)}: {member.get('member_id', 'Unknown')}")
+            
+            # Extract member ID HTML for URL
+            member_id_html = member.get('member_id_html', member.get('member_id', ''))
+            if not member_id_html:
+                print(f"  Skipping: No member ID found")
+                enriched_results.append(member)
+                continue
+            
+            # Extract URL from HTML
+            if '<a href=' in member_id_html:
+                import re
+                url_match = re.search(r'href="([^"]+)"', member_id_html)
+                if url_match:
+                    profile_url = url_match.group(1).replace('&amp;', '&')
+                    
+                    try:
+                        # Navigate to profile page
+                        await page.goto(profile_url, wait_until='networkidle', timeout=15000)
+                        
+                        # Parse profile details
+                        from .utils import parse_profile_table
+                        profile_details = await parse_profile_table(page)
+                        
+                        # Merge profile details with member data
+                        enriched_member = member.copy()
+                        enriched_member.update(profile_details)
+                        
+                        # Remove HTML field from output
+                        if 'member_id_html' in enriched_member:
+                            del enriched_member['member_id_html']
+                        
+                        enriched_results.append(enriched_member)
+                        print(f"  ✓ Enriched: {profile_details.get('breeder_type', 'N/A')} - {profile_details.get('profile_type', 'N/A')}")
+                        
+                    except Exception as e:
+                        print(f"  ✗ Error: {e}")
+                        # Add empty profile fields if there's an error
+                        enriched_member = member.copy()
+                        enriched_member.update({
+                            'breeder_type': '',
+                            'profile_type': '',
+                            'profile_id': '',
+                            'profile_name': '',
+                            'dba': '',
+                            'herd_prefix': ''
+                        })
+                        enriched_results.append(enriched_member)
+                else:
+                    print(f"  Skipping: Could not extract profile URL")
+                    enriched_results.append(member)
+            else:
+                print(f"  Skipping: No profile link found")
+                enriched_results.append(member)
+        
+        print(f"\nEnrichment complete. {len(enriched_results)} results processed.")
+        
+        # Display enriched results
+        print("\n" + self.scraper.format_results(enriched_results))
+        
+        # Ask if user wants to export enriched results
+        while True:
+            try:
+                export_choice = input("\nExport enriched results? (y/n): ").strip().lower()
+                
+                if export_choice == 'y':
+                    print("\nExport options:")
+                    print("1. Export to CSV")
+                    print("2. Export to JSON")
+                    print("3. Skip export")
+                    
+                    export_option = input("Enter your choice (1-3): ").strip()
+                    
+                    if export_option == "1":
+                        filename = input("Enter CSV filename (or press Enter for 'ranch_results_enriched.csv'): ").strip()
+                        if not filename:
+                            filename = "ranch_results_enriched.csv"
+                        exported_file = self.exporter.export_to_csv(enriched_results, filename)
+                        if exported_file:
+                            print(f"Enriched results exported to: {exported_file}")
+                        break
+                    elif export_option == "2":
+                        filename = input("Enter JSON filename (or press Enter for 'ranch_results_enriched.json'): ").strip()
+                        if not filename:
+                            filename = "ranch_results_enriched.json"
+                        exported_file = self.exporter.export_to_json(enriched_results, filename)
+                        if exported_file:
+                            print(f"Enriched results exported to: {exported_file}")
+                        break
+                    elif export_option == "3":
+                        print("Export skipped.")
+                        break
+                    else:
+                        print("Invalid choice. Please enter 1, 2, or 3.")
+                elif export_choice == 'n':
+                    print("Export skipped.")
+                    break
+                else:
+                    print("Invalid choice. Please enter 'y' or 'n'.")
                     
             except KeyboardInterrupt:
                 print("\nOperation cancelled.")

@@ -161,12 +161,13 @@ def format_table_output(data: List[Dict[str, str]], max_width: int = 80) -> str:
     if not data:
         return "No data to display"
     
-    # Get column headers from first row
+    # Get column headers from first row, excluding internal HTML fields
     headers = list(data[0].keys())
+    display_headers = [h for h in headers if h != 'member_id_html']
     
     # Calculate column widths
     col_widths = {}
-    for header in headers:
+    for header in display_headers:
         max_width_for_col = len(header)
         for row in data:
             value = str(row.get(header, ''))
@@ -177,7 +178,7 @@ def format_table_output(data: List[Dict[str, str]], max_width: int = 80) -> str:
     lines = []
     
     # Header
-    header_line = " | ".join(f"{h:<{col_widths[h]}}" for h in headers)
+    header_line = " | ".join(f"{h:<{col_widths[h]}}" for h in display_headers)
     separator = "=" * len(header_line)
     lines.append(separator)
     lines.append(header_line)
@@ -186,7 +187,7 @@ def format_table_output(data: List[Dict[str, str]], max_width: int = 80) -> str:
     # Data rows
     for row in data:
         row_values = []
-        for header in headers:
+        for header in display_headers:
             value = str(row.get(header, ''))
             truncated = truncate_text(value, col_widths[header])
             row_values.append(f"{truncated:<{col_widths[header]}}")
@@ -282,4 +283,80 @@ def sanitize_filename(filename: str) -> str:
     if not filename:
         filename = "ranch_results"
     
-    return filename 
+    return filename
+
+
+async def parse_profile_table(page) -> Dict[str, str]:
+    """
+    Parse member profile table from the profile page
+    
+    Args:
+        page: Playwright page object pointing to member profile
+        
+    Returns:
+        Dictionary with profile details
+    """
+    try:
+        # Wait for the profile details table
+        await page.wait_for_selector('#ajax_profile_details table', timeout=10000)
+        
+        # Extract all profile data using JavaScript
+        profile_data = await page.evaluate("""
+            () => {
+                const table = document.querySelector('#ajax_profile_details table');
+                if (!table) return { breeder_type: '', profile_data: {} };
+                
+                const rows = table.querySelectorAll('tr');
+                const data = {};
+                let breeder_type = '';
+                
+                for (const row of rows) {
+                    const cells = row.querySelectorAll('td');
+                    
+                    // Check for breeder type in first row with colspan="2"
+                    if (cells.length === 1 && cells[0].getAttribute('colspan') === '2') {
+                        breeder_type = cells[0].textContent.trim();
+                        console.log('Found breeder type:', breeder_type);
+                        continue;
+                    }
+                    
+                    // Handle regular label-value pairs
+                    if (cells.length >= 2) {
+                        const label = cells[0].textContent.trim();
+                        const value = cells[1].textContent.trim();
+                        
+                        if (label && value) {
+                            data[label] = value;
+                            console.log('Found field:', label, '=', value);
+                        }
+                    }
+                }
+                
+                console.log('Final breeder_type:', breeder_type);
+                console.log('Final data:', data);
+                return { breeder_type, profile_data: data };
+            }
+        """)
+        
+        # Map the extracted data to our expected fields
+        result = {
+            'breeder_type': profile_data.get('breeder_type', ''),
+            'profile_type': profile_data.get('profile_data', {}).get('Profile Type:', ''),
+            'profile_id': profile_data.get('profile_data', {}).get('Official Profile ID:', ''),
+            'profile_name': profile_data.get('profile_data', {}).get('Official Profile Name:', ''),
+            'dba': profile_data.get('profile_data', {}).get('DBA:', ''),
+            'herd_prefix': profile_data.get('profile_data', {}).get('Herd Prefix:', '')
+        }
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error parsing profile table: {e}")
+        return {
+            'breeder_type': '',
+            'profile_type': '',
+            'profile_id': '',
+            'profile_name': '',
+            'dba': '',
+            'herd_prefix': ''
+        } 

@@ -5,10 +5,11 @@ Interacts with browser and extracts data dynamically
 """
 
 import asyncio
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from playwright.async_api import async_playwright, Browser, Page
 from .form_parser import FormParser
-from .utils import normalize_string, clean_table_data, format_table_output
+from .utils import normalize_string, clean_table_data, format_table_output, parse_profile_table
 
 
 class DynamicScraper:
@@ -249,17 +250,24 @@ class DynamicScraper:
                             const rowData = {};
                             for (let j = 0; j < cells.length; j++) {
                                 const cell = cells[j];
-                                const text = cell.textContent.trim();
                                 
-                                // Try to determine column type based on content
-                                if (j === 0) rowData['type'] = text;
-                                else if (j === 1) rowData['member_id'] = text;
-                                else if (j === 2) rowData['herd_prefix'] = text;
-                                else if (j === 3) rowData['member_name'] = text;
-                                else if (j === 4) rowData['dba'] = text;
-                                else if (j === 5) rowData['city'] = text;
-                                else if (j === 6) rowData['state'] = text;
-                                else rowData[`column_${j}`] = text;
+                                // For member_id column (j === 1), preserve HTML to extract links
+                                if (j === 1) {
+                                    const innerHTML = cell.innerHTML.trim();
+                                    rowData['member_id_html'] = innerHTML; // Keep HTML for enrichment
+                                    rowData['member_id'] = cell.textContent.trim(); // Keep text for display
+                                } else {
+                                    const text = cell.textContent.trim();
+                                    
+                                    // Try to determine column type based on content
+                                    if (j === 0) rowData['type'] = text;
+                                    else if (j === 2) rowData['herd_prefix'] = text;
+                                    else if (j === 3) rowData['member_name'] = text;
+                                    else if (j === 4) rowData['dba'] = text;
+                                    else if (j === 5) rowData['city'] = text;
+                                    else if (j === 6) rowData['state'] = text;
+                                    else rowData[`column_${j}`] = text;
+                                }
                             }
                             
                             // Only add if we have meaningful data
@@ -390,4 +398,105 @@ class DynamicScraper:
         Returns:
             Formatted table string
         """
-        return format_table_output(results) 
+        return format_table_output(results)
+    
+    async def enrich_with_member_details(self, page: Page, ranch_results: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Enrich ranch results with member profile details
+        
+        Args:
+            page: Playwright page object
+            ranch_results: Original ranch search results
+            
+        Returns:
+            Enriched results with profile details
+        """
+        if not ranch_results:
+            return ranch_results
+        
+        print(f"\nEnriching {len(ranch_results)} results with member profile details...")
+        
+        enriched_results = []
+        
+        for i, ranch in enumerate(ranch_results, 1):
+            print(f"Processing member {i}/{len(ranch_results)}...")
+            print(f"  Available fields: {list(ranch.keys())}")
+            
+            # Extract member ID and profile URL
+            member_id_html = ranch.get('member_id_html', ranch.get('member_id', ranch.get('Member ID', '')))
+            print(f"  Member ID HTML: {member_id_html[:100]}...")  # Show first 100 chars
+            if not member_id_html:
+                print(f"  Skipping row {i}: No Member ID found")
+                enriched_results.append(ranch)
+                continue
+            
+            # Extract member ID text and URL from HTML
+            member_id = ''
+            profile_url = ''
+            
+            if '<a href=' in member_id_html:
+                # Extract URL from the anchor tag
+                url_match = re.search(r'href="([^"]+)"', member_id_html)
+                if url_match:
+                    profile_url = url_match.group(1)
+                    # Decode HTML entities
+                    profile_url = profile_url.replace('&amp;', '&')
+                
+                # Extract the member ID text from between <u> tags or anchor text
+                text_match = re.search(r'<u>([^<]+)</u>', member_id_html)
+                if text_match:
+                    member_id = text_match.group(1).strip()
+                else:
+                    # Fallback: extract text from anchor tag
+                    text_match = re.search(r'>([^<]+)</a>', member_id_html)
+                    if text_match:
+                        member_id = text_match.group(1).strip()
+            else:
+                # No link found, use the raw text as member ID
+                member_id = member_id_html.strip()
+                # Try to construct URL from member ID
+                profile_url = f"https://shorthorn.digitalbeef.com/modules.php?op=modload&name=_ranch&file=_ranch&member_id={member_id}"
+            
+            if not profile_url:
+                print(f"  Skipping row {i}: Could not extract profile URL")
+                enriched_results.append(ranch)
+                continue
+            
+            try:
+                # Navigate to profile page
+                print(f"  Navigating to: {profile_url}")
+                await page.goto(profile_url, wait_until='networkidle', timeout=15000)
+                
+                # Parse profile details
+                profile_details = await parse_profile_table(page)
+                
+                # Debug output
+                print(f"  Extracted profile details: {profile_details}")
+                
+                # Merge profile details with ranch data
+                enriched_ranch = ranch.copy()
+                enriched_ranch.update(profile_details)
+                
+                # Remove the HTML field from final output
+                if 'member_id_html' in enriched_ranch:
+                    del enriched_ranch['member_id_html']
+                
+                enriched_results.append(enriched_ranch)
+                print(f"  ✓ Enriched member {member_id} - Breeder: {profile_details.get('breeder_type', 'N/A')}, Profile: {profile_details.get('profile_type', 'N/A')}")
+                
+            except Exception as e:
+                print(f"  ✗ Error processing member {member_id}: {e}")
+                # Add empty profile fields if there's an error
+                enriched_ranch = ranch.copy()
+                enriched_ranch.update({
+                    'breeder_type': '',
+                    'profile_type': '',
+                    'profile_id': '',
+                    'profile_name': '',
+                    'dba': '',
+                    'herd_prefix': ''
+                })
+                enriched_results.append(enriched_ranch)
+        
+        print(f"Enrichment complete. {len(enriched_results)} results processed.")
+        return enriched_results 
