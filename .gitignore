@@ -196,6 +196,7 @@ auto-save-list
 tramp
 .\#*
 
+tools
 # macOS
 .DS_Store
 .AppleDouble
