@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from playwright.async_api import Page
 from .scraper import EPDSearchScraper
 from ranch_scraper.exporter import DynamicExporter
@@ -10,47 +10,127 @@ class EPDSearchCLI:
         self.scraper = EPDSearchScraper()
         self.exporter = DynamicExporter()
 
+    def _print_numbered_list(self, items: List[str]):
+        for i, item in enumerate(items, 1):
+            print(f'{i:2d}. {item}')
+
+    def _parse_selection_tokens(self, token_str: str, traits: List[str]) -> Set[int]:
+        selections: Set[int] = set()
+        tokens = [t.strip() for t in token_str.split(',') if t.strip()]
+        trait_upper = [t.upper() for t in traits]
+        for token in tokens:
+            if token.lower() in ['a', 'all']:
+                selections.update(range(1, len(traits) + 1))
+                continue
+            if '-' in token:
+                try:
+                    start, end = token.split('-', 1)
+                    start_i = int(start)
+                    end_i = int(end)
+                    if start_i <= end_i:
+                        for i in range(start_i, end_i + 1):
+                            if 1 <= i <= len(traits):
+                                selections.add(i)
+                except ValueError:
+                    # Ignore invalid range, try substring matching instead
+                    pass
+                continue
+            # Try numeric index
+            try:
+                idx = int(token)
+                if 1 <= idx <= len(traits):
+                    selections.add(idx)
+                    continue
+            except ValueError:
+                pass
+            # Try substring match
+            token_up = token.upper()
+            for i, name_up in enumerate(trait_upper, 1):
+                if token_up in name_up:
+                    selections.add(i)
+        return selections
+
+    def _prompt_trait_selection(self, traits: List[str]) -> List[str]:
+        print('Available EPD traits:')
+        self._print_numbered_list(traits)
+        print('\nTips:')
+        print("- Enter numbers or ranges (e.g., '1,3-5,12')")
+        print("- Or type parts of names (e.g., 'weight, milk')")
+        print("- Use 'all' to select all, or press Enter to skip")
+        raw = input('\nChoose traits to filter (optional): ').strip()
+        if not raw:
+            return []
+        selected_indexes = self._parse_selection_tokens(raw, traits)
+        if not selected_indexes:
+            print('No valid selection detected. Skipping trait filters.')
+            return []
+        selected_sorted = sorted(selected_indexes)
+        chosen = [traits[i - 1] for i in selected_sorted]
+        print('\nSelected traits:')
+        for name in chosen:
+            print(f'- {name}')
+        return chosen
+
     async def collect_epd_parameters(self, page: Page) -> Dict[str, str]:
         print('=== EPD Search Interactive Mode ===')
-        print('Enter EPD search parameters (press Enter to skip):')
+        print('Enter EPD search parameters (press Enter to skip).')
         print()
-        params = {}
+        params: Dict[str, str] = {}
         traits = self.scraper.form_parser.get_epd_traits()
-        print('Available EPD traits:')
-        for i, trait in enumerate(traits, 1):
-            print(f'{i}. {trait}')
-        print()
-        for trait in traits:
+
+        # Step 1: choose which traits to fill
+        chosen_traits = self._prompt_trait_selection(traits)
+
+        # Step 2: prompt only for chosen traits
+        for trait in chosen_traits:
             trait_key = trait.lower().replace(' ', '_').replace('$', '')
             print(f'\n--- {trait} ---')
-            min_val = input(f'Minimum {trait} (or press Enter to skip): ').strip()
+            min_val = input(f'Minimum {trait} (Press Enter to skip): ').strip()
             if min_val:
                 params[f'{trait_key}_min'] = min_val
-            max_val = input(f'Maximum {trait} (or press Enter to skip): ').strip()
+            max_val = input(f'Maksimum {trait} (Press Enter to skip): ').strip()
             if max_val:
                 params[f'{trait_key}_max'] = max_val
             trait_fields = self.scraper.form_parser.get_trait_fields(trait)
             if trait_fields.get('acc'):
-                acc_val = input(f'Minimum accuracy for {trait} (or press Enter to skip): ').strip()
+                acc_val = input(f'Akurasi minimum untuk {trait} (Press Enter to skip): ').strip()
                 if acc_val:
                     params[f'{trait_key}_acc'] = acc_val
+
+        # Step 3: sort option (choice list)
         print('\n--- Sort Options ---')
-        print('Available sort fields:')
+        sort_options: List[tuple] = []
         for trait in traits:
             trait_fields = self.scraper.form_parser.get_trait_fields(trait)
             sort_value = trait_fields.get('sort')
             if sort_value:
-                print(f'- {trait}: {sort_value}')
-        sort_choice = input("\nEnter sort field (or press Enter for default 'epd_ww'): ").strip()
-        if sort_choice:
-            params['sort_field'] = sort_choice
+                sort_options.append((trait, sort_value))
+        default_sort = 'epd_ww'
+        print('Available sort fields:')
+        for i, (label, value) in enumerate(sort_options, 1):
+            default_marker = ' (default)' if value == default_sort else ''
+            print(f'{i:2d}. {label} -> {value}{default_marker}')
+        sort_raw = input("Choose sort number (or type value), press Enter for default 'epd_ww': ").strip()
+        if not sort_raw:
+            params['sort_field'] = default_sort
         else:
-            params['sort_field'] = 'epd_ww'
+            try:
+                sort_idx = int(sort_raw)
+                if 1 <= sort_idx <= len(sort_options):
+                    params['sort_field'] = sort_options[sort_idx - 1][1]
+                else:
+                    print('Sort number out of range. Using default.')
+                    params['sort_field'] = default_sort
+            except ValueError:
+                # assume user typed value
+                params['sort_field'] = sort_raw
+
+        # Step 4: sex filter
         print('\n--- Sex Filter ---')
         print('1. Bulls (B)')
         print('2. Females (C)')
         print('3. Both (default)')
-        sex_choice = input('Enter choice (1-3, or press Enter for Both): ').strip()
+        sex_choice = input('Enter choice (1-3, press Enter for Both): ').strip()
         if sex_choice == '1':
             params['search_sex'] = 'B'
         elif sex_choice == '2':
