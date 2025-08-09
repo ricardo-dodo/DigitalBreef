@@ -71,7 +71,7 @@ class AnimalFormParser:
             if field:
                 await page.click(f'input[name="{self.search_field_name}"][value="{field}"]')
             if value is not None:
-                await page.fill(f'#{self.search_value_id}', value)
+                await page.fill(f'#{self.search_value_id}', value.upper())
             return True
         except Exception as e:
             print(f'Error filling Animal form: {e}')
@@ -82,7 +82,18 @@ class AnimalFormParser:
             # Prefer JS function if present, else click button
             has_func = await page.evaluate('typeof doSearch_Animal === "function"')
             if has_func:
-                await page.evaluate("doSearch_Animal('');")
+                selected_field = await page.evaluate(
+                    """
+                    () => {
+                        const f = document.querySelector('input[name="animal_search_fld"]:checked');
+                        return f ? f.value : '';
+                    }
+                    """
+                )
+                if not selected_field:
+                    selected_field = ''
+                await page.evaluate(f'doSearch_Animal("{selected_field}")')
+                await page.wait_for_timeout(500)
                 return True
             await page.click(f'#{self.submit_button_id}')
             return True

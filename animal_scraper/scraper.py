@@ -70,22 +70,19 @@ class AnimalSearchScraper:
 
     async def _wait_for_results(self, page: Page) -> bool:
         try:
-            # Wait until header with "Animals Matched Your Criteria" appears or rows render
+            # Wait until results container appears and has rows
             for _ in range(60):
-                has_header = await page.evaluate("""
-                    () => {
-                        const header = Array.from(document.querySelectorAll('td'))
-                          .some(td => td.textContent && td.textContent.includes('Animals Matched Your Criteria'));
-                        return header;
-                    }
+                has_container = await page.evaluate("""
+                    () => !!document.querySelector('#dvSearchResults')
                 """)
-                has_rows = await page.evaluate("""
-                    () => document.querySelectorAll('tr[id^="tr_"]').length > 0
-                """)
-                if has_header or has_rows:
-                    return True
-                await page.wait_for_timeout(1000)
-            return True  # don't block forever
+                if has_container:
+                    has_rows = await page.evaluate("""
+                        () => document.querySelectorAll('#dvSearchResults tr[id^="tr_"]').length > 0
+                    """)
+                    if has_rows:
+                        return True
+                await page.wait_for_timeout(500)
+            return False
         except Exception as e:
             print(f'Error waiting for Animal results: {e}')
             return False
@@ -95,9 +92,10 @@ class AnimalSearchScraper:
             results = await page.evaluate(
                 """
                 () => {
-                    const rows = document.querySelectorAll('tr[id^="tr_"]');
-                    const out = [];
-                    for (const row of rows) {
+                                         const container = document.querySelector('#dvSearchResults');
+                     const rows = container ? container.querySelectorAll('tr[id^="tr_"]') : [];
+                     const out = [];
+                     for (const row of rows) {
                         const cells = row.querySelectorAll('td');
                         if (!cells || cells.length < 4) continue;
                         const regCell = cells[0];
