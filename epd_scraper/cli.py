@@ -161,19 +161,20 @@ class EPDSearchCLI:
             else:
                 formatted_results = self.scraper.format_results(results)
             print('\n' + formatted_results)
-            await self._show_follow_up_menu(results)
+            await self._show_follow_up_menu(page, results)
         except Exception as e:
             print(f'Error in EPD scraper: {e}')
 
-    async def _show_follow_up_menu(self, data):
+    async def _show_follow_up_menu(self, page: Page, data: List[Dict[str, str]]):
         while True:
             print('\nWhat would you like to do next?')
             print('1. Export results to CSV')
             print('2. Export results to JSON')
             print('3. View animal details')
-            print('4. Return to main menu')
+            print('4. New search')
+            print('5. Return to main menu')
             try:
-                choice = input('\nEnter your choice (1-3): ').strip()
+                choice = input('\nEnter your choice (1-5): ').strip()
                 if choice == '1':
                     filename = input("Enter CSV filename (or press Enter for 'epd_results.csv'): ").strip()
                     if not filename:
@@ -181,7 +182,6 @@ class EPDSearchCLI:
                     exported_file = self.exporter.export_to_csv(data, filename)
                     if exported_file:
                         print(f'Results exported to: {exported_file}')
-                    break
                 elif choice == '2':
                     filename = input("Enter JSON filename (or press Enter for 'epd_results.json'): ").strip()
                     if not filename:
@@ -189,26 +189,42 @@ class EPDSearchCLI:
                     exported_file = self.exporter.export_to_json(data, filename)
                     if exported_file:
                         print(f'Results exported to: {exported_file}')
-                    break
                 elif choice == '3':
-                    await self._view_animal_details(data)
-                    break
+                    updated = await self._view_animal_details(page, data)
+                    if isinstance(updated, list) and updated:
+                        data = updated
+                        print('\n' + self.scraper.format_results_table(data))
                 elif choice == '4':
+                    # Run a new EPD search in-place
+                    if not await self.scraper.wait_for_epd_form_ready(page):
+                        print('Failed to load EPD search form')
+                        continue
+                    params = await self.collect_epd_parameters(page)
+                    if not params:
+                        print('No search parameters provided.')
+                        continue
+                    new_results = await self.scraper.scrape_epd(params)
+                    if not new_results:
+                        print('No EPD results found')
+                        continue
+                    data = new_results
+                    print('\n' + self.scraper.format_results_table(data))
+                elif choice == '5':
                     print('Returning to main menu...')
                     break
                 else:
-                    print('Invalid choice. Please enter 1, 2, 3, or 4.')
+                    print('Invalid choice. Please enter 1, 2, 3, 4, or 5.')
             except KeyboardInterrupt:
                 print('\nOperation cancelled.')
                 break
             except Exception as e:
                 print(f'Error: {e}')
-                break
+                # keep looping
 
-    async def _view_animal_details(self, data: List[Dict[str, str]]):
+    async def _view_animal_details(self, page: Page, data: List[Dict[str, str]]):
         if not data:
             print('No data available for viewing details.')
-            return
+            return data
         print(f'\nFound {len(data)} animals. Which one would you like to view details for?')
         for i, animal in enumerate(data, 1):
             registration = animal.get('registration', 'Unknown')
@@ -218,103 +234,102 @@ class EPDSearchCLI:
         print(f'{len(data) + 2}. Cancel')
         try:
             choice = input(f'\nEnter your choice (1-{len(data) + 2}): ').strip()
-            if choice.isdigit():
-                choice_num = int(choice)
-                if choice_num == len(data) + 1:
-                    await self._view_all_animal_details(data)
-                elif choice_num == len(data) + 2:
-                    print('Cancelled.')
-                    return
-                elif 1 <= choice_num <= len(data):
-                    selected_animal = data[choice_num - 1]
-                    await self._view_single_animal_detail(selected_animal)
-                else:
-                    print('Invalid choice.')
-            else:
+            if not choice.isdigit():
                 print('Invalid input. Please enter a number.')
+                return data
+            choice_num = int(choice)
+            if choice_num == len(data) + 1:
+                return await self._view_all_animal_details(page, data)
+            elif choice_num == len(data) + 2:
+                print('Cancelled.')
+                return data
+            elif 1 <= choice_num <= len(data):
+                selected_index = choice_num - 1
+                selected_animal = data[selected_index]
+                registration_url = selected_animal.get('registration_url')
+                if not registration_url:
+                    print('No detail URL available for this animal.')
+                    return data
+                print(f"\nFetching details for {selected_animal.get('registration', 'Unknown')}...")
+                try:
+                    self.scraper.browser, self.scraper.playwright = await self.scraper.init_browser()
+                    detail_page = await self.scraper.browser.new_page()
+                    details = await self.scraper.extract_animal_detail(detail_page, registration_url)
+                    if details:
+                        formatted_details = self.scraper.format_animal_detail(details)
+                        print('\n' + formatted_details)
+                        updated = selected_animal.copy()
+                        updated.update(details)
+                        new_data = data.copy()
+                        new_data[selected_index] = updated
+                        return new_data
+                    else:
+                        print('Failed to extract animal details.')
+                        return data
+                except Exception as e:
+                    print(f'Error viewing animal details: {e}')
+                    return data
+                finally:
+                    if self.scraper.browser:
+                        try:
+                            await self.scraper.browser.close()
+                        except Exception:
+                            pass
+                    if self.scraper.playwright:
+                        try:
+                            await self.scraper.playwright.stop()
+                        except Exception:
+                            pass
+            else:
+                print('Invalid choice.')
+                return data
         except KeyboardInterrupt:
             print('\nOperation cancelled.')
+            return data
         except Exception as e:
             print(f'Error: {e}')
+            return data
 
-    async def _view_single_animal_detail(self, animal: Dict[str, str]):
-        registration_url = animal.get('registration_url')
-        if not registration_url:
-            print('No detail URL available for this animal.')
-            return
-        print(f"\nFetching details for {animal.get('registration', 'Unknown')}...")
-        try:
-            self.scraper.browser, self.scraper.playwright = await self.scraper.init_browser()
-            page = await self.scraper.browser.new_page()
-            details = await self.scraper.extract_animal_detail(page, registration_url)
-            if details:
-                formatted_details = self.scraper.format_animal_detail(details)
-                print('\n' + formatted_details)
-            else:
-                print('Failed to extract animal details.')
-        except Exception as e:
-            print(f'Error viewing animal details: {e}')
-        finally:
-            if self.scraper.browser:
-                try:
-                    await self.scraper.browser.close()
-                except Exception as e:
-                    print(f'Warning: Error closing browser: {e}')
-            if self.scraper.playwright:
-                try:
-                    await self.scraper.playwright.stop()
-                except Exception as e:
-                    print(f'Warning: Error stopping playwright: {e}')
-
-    async def _view_all_animal_details(self, data: List[Dict[str, str]]):
+    async def _view_all_animal_details(self, page: Page, data: List[Dict[str, str]]):
         print(f'\nFetching details for all {len(data)} animals...')
         try:
             self.scraper.browser, self.scraper.playwright = await self.scraper.init_browser()
-            page = await self.scraper.browser.new_page()
+            detail_page = await self.scraper.browser.new_page()
             all_details = []
             for i, animal in enumerate(data, 1):
                 registration_url = animal.get('registration_url')
                 if not registration_url:
                     print(f"Skipping {animal.get('registration', 'Unknown')} - no URL available")
+                    all_details.append(animal)
                     continue
                 print(f"Processing {i}/{len(data)}: {animal.get('registration', 'Unknown')}")
                 try:
-                    details = await self.scraper.extract_animal_detail(page, registration_url)
-                    if details:
-                        merged_data = {**animal, **details}
-                        all_details.append(merged_data)
-                    else:
-                        print(f"Failed to extract details for {animal.get('registration', 'Unknown')}")
+                    details = await self.scraper.extract_animal_detail(detail_page, registration_url)
+                    merged_data = animal.copy()
+                    merged_data.update(details)
+                    all_details.append(merged_data)
                 except Exception as e:
                     print(f"Error processing {animal.get('registration', 'Unknown')}: {e}")
+                    all_details.append(animal)
                     continue
-            if all_details:
-                print(f'\nSuccessfully extracted details for {len(all_details)} animals.')
-                print('\nHow would you like to display the detailed results?')
-                print('1. Detailed format (organized by categories)')
-                print('2. Table format (simple table)')
-                format_choice = input('\nEnter your choice (1-2, default 1): ').strip()
-                if format_choice == '2':
-                    formatted_results = self.scraper.format_results_table(all_details)
-                else:
-                    formatted_results = self.scraper.format_results(all_details)
-                print('\n' + formatted_results)
-                await self._show_export_menu(all_details)
-            else:
-                print('No animal details were successfully extracted.')
+            print('\nExtraction complete.')
+            print('\n' + self.scraper.format_results_table(all_details))
+            await self._show_export_menu(all_details)
+            return all_details
         except Exception as e:
             print(f'Error viewing all animal details: {e}')
+            return data
         finally:
             if self.scraper.browser:
                 try:
                     await self.scraper.browser.close()
-                except Exception as e:
-                    print(f'Warning: Error closing browser: {e}')
+                except Exception:
+                    pass
             if self.scraper.playwright:
                 try:
                     await self.scraper.playwright.stop()
-                except Exception as e:
-                    print(f'Warning: Error stopping playwright: {e}')
+                except Exception:
+                    pass
 
     async def _show_export_menu(self, data: List[Dict[str, str]]):
         while True:

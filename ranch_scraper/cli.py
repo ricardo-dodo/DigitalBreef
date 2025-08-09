@@ -158,15 +158,16 @@ class RanchScraperCLI:
         except Exception as e:
             print(f'Error in ranch scraper: {e}')
 
-    async def _show_follow_up_menu(self, data, page):
+    async def _show_follow_up_menu(self, data: List[Dict[str, str]], page: Page):
         while True:
             print('\nWhat would you like to do next?')
             print('1. Export results to CSV')
             print('2. Export results to JSON')
             print("3. View a member's full detail")
-            print('4. Return to main menu')
+            print('4. New search')
+            print('5. Return to main menu')
             try:
-                choice = input('\nEnter your choice (1-4): ').strip()
+                choice = input('\nEnter your choice (1-5): ').strip()
                 if choice == '1':
                     filename = input("Enter CSV filename (or press Enter for 'ranch_results.csv'): ").strip()
                     if not filename:
@@ -174,7 +175,6 @@ class RanchScraperCLI:
                     exported_file = self.exporter.export_to_csv(data, filename)
                     if exported_file:
                         print(f'Results exported to: {exported_file}')
-                    break
                 elif choice == '2':
                     filename = input("Enter JSON filename (or press Enter for 'ranch_results.json'): ").strip()
                     if not filename:
@@ -182,26 +182,40 @@ class RanchScraperCLI:
                     exported_file = self.exporter.export_to_json(data, filename)
                     if exported_file:
                         print(f'Results exported to: {exported_file}')
-                    break
                 elif choice == '3':
-                    await self._view_member_detail(data, page)
-                    break
+                    updated = await self._view_member_detail(data, page)
+                    if isinstance(updated, list) and updated:
+                        data = updated
+                        print('\n' + self.scraper.format_results(data))
                 elif choice == '4':
+                    from .interactive_prompt import InteractivePrompt
+                    interactive_prompt = InteractivePrompt()
+                    params, _, _ = await interactive_prompt.run_interactive_mode(page)
+                    if not params:
+                        print('No search parameters provided.')
+                        continue
+                    new_results = await self.scraper.scrape_ranches(params)
+                    if not new_results:
+                        print('No results found')
+                        continue
+                    data = new_results
+                    print('\n' + self.scraper.format_results(data))
+                elif choice == '5':
                     print('Returning to main menu...')
                     break
                 else:
-                    print('Invalid choice. Please enter 1, 2, 3, or 4.')
+                    print('Invalid choice. Please enter 1, 2, 3, 4, or 5.')
             except KeyboardInterrupt:
                 print('\nOperation cancelled.')
                 break
             except Exception as e:
                 print(f'Error: {e}')
-                break
+                # Keep the loop running
 
-    async def _view_member_detail(self, data, page):
+    async def _view_member_detail(self, data: List[Dict[str, str]], page: Page) -> List[Dict[str, str]]:
         if not data:
             print('No data available to view details.')
-            return
+            return data
         print(f'\nAvailable members ({len(data)} total):')
         for i, member in enumerate(data, 1):
             member_id = member.get('member_id', member.get('Member ID', 'Unknown'))
@@ -210,29 +224,27 @@ class RanchScraperCLI:
         print(f'\nView options:')
         print('1. View one member detail')
         print('2. View all members detail')
-        print('3. Return to main menu')
+        print('3. Cancel')
         while True:
             try:
                 choice = input(f'\nEnter your choice (1-3): ').strip()
                 if choice == '1':
-                    await self._view_single_member_detail(data, page)
-                    break
+                    return await self._view_single_member_detail(data, page)
                 elif choice == '2':
-                    await self._view_all_members_detail(data, page)
-                    break
+                    return await self._view_all_members_detail(data, page)
                 elif choice == '3':
-                    print('Returning to main menu...')
-                    break
+                    print('Cancelled.')
+                    return data
                 else:
                     print('Invalid choice. Please enter 1, 2, or 3.')
             except KeyboardInterrupt:
                 print('\nOperation cancelled.')
-                break
+                return data
             except Exception as e:
                 print(f'Error: {e}')
-                break
+                return data
 
-    async def _show_member_detail(self, member, page):
+    async def _show_member_detail(self, member, page) -> Optional[Dict[str, str]]:
         print(f'\n=== Member Detail ===')
         print(f"Member ID: {member.get('member_id', 'N/A')}")
         print(f"Member Name: {member.get('member_name', 'N/A')}")
@@ -243,7 +255,7 @@ class RanchScraperCLI:
         member_id_html = member.get('member_id_html', member.get('member_id', ''))
         if not member_id_html:
             print('No member ID found for detail view.')
-            return
+            return None
         if '<a href=' in member_id_html:
             import re
             url_match = re.search('href="([^"]+)"', member_id_html)
@@ -254,63 +266,33 @@ class RanchScraperCLI:
                     await page.goto(profile_url, wait_until='networkidle', timeout=15000)
                     from .utils import parse_profile_table
                     profile_details = await parse_profile_table(page)
-                    print(f'\n=== Profile Details ===')
-                    print(f"Breeder Type: {profile_details.get('breeder_type', 'N/A')}")
-                    print(f"Profile Type: {profile_details.get('profile_type', 'N/A')}")
-                    print(f"Official Profile ID: {profile_details.get('profile_id', 'N/A')}")
-                    print(f"Official Profile Name: {profile_details.get('profile_name', 'N/A')}")
-                    print(f"DBA: {profile_details.get('dba', 'N/A')}")
-                    print(f"Herd Prefix: {profile_details.get('herd_prefix', 'N/A')}")
-                    member_id_match = re.search('member_id=(\\d+)', profile_url)
+                    # Also enrich with addresses/phones/contacts
+                    member_id_match = re.search('member_id=(\d+)', profile_url)
+                    addresses = []
+                    phones = []
+                    contacts = []
                     if member_id_match:
                         member_id_num = member_id_match.group(1)
-                        print(f'\n=== Addresses ===')
                         addresses = await self._get_addresses(page, member_id_num)
-                        if addresses:
-                            for i, addr in enumerate(addresses, 1):
-                                print(f'Address {i}:')
-                                print(f"  Type: {addr.get('type', 'N/A')}")
-                                print(f"  Street: {addr.get('street', 'N/A')}")
-                                print(f"  City: {addr.get('city', 'N/A')}")
-                                print(f"  State: {addr.get('state', 'N/A')}")
-                                print(f"  Postal Code: {addr.get('postal_code', 'N/A')}")
-                                print(f"  Country: {addr.get('country', 'N/A')}")
-                                print(f"  Email: {addr.get('email', 'N/A')}")
-                        else:
-                            print('No addresses found.')
-                        print(f'\n=== Phones ===')
                         phones = await self._get_phones(page, member_id_num)
-                        if phones:
-                            for i, phone in enumerate(phones, 1):
-                                print(f'Phone {i}:')
-                                print(f"  Type: {phone.get('type', 'N/A')}")
-                                print(f"  Country Code: {phone.get('country_code', 'N/A')}")
-                                print(f"  Area Code: {phone.get('area_code', 'N/A')}")
-                                print(f"  Prefix: {phone.get('prefix', 'N/A')}")
-                                print(f"  Suffix: {phone.get('suffix', 'N/A')}")
-                                print(f"  Extension: {phone.get('extension', 'N/A')}")
-                                print(f"  Full Number: {phone.get('full_number', 'N/A')}")
-                        else:
-                            print('No phones found.')
-                        print(f'\n=== Contacts ===')
                         contacts = await self._get_contacts(page, member_id_num)
-                        if contacts:
-                            for i, contact in enumerate(contacts, 1):
-                                print(f'Contact {i}:')
-                                print(f"  Job/Position: {contact.get('job_title', 'N/A')}")
-                                print(f"  Name: {contact.get('name', 'N/A')}")
-                                print(f"  Nickname: {contact.get('nickname', 'N/A')}")
-                                print(f"  Email: {contact.get('email', 'N/A')}")
-                                print(f"  Phone: {contact.get('phone', 'N/A')}")
-                                print(f"  Address: {contact.get('address', 'N/A')}")
-                        else:
-                            print('No contacts found.')
+                    enriched_member = member.copy()
+                    enriched_member.update(profile_details)
+                    enriched_member['addresses'] = addresses
+                    enriched_member['phones'] = phones
+                    enriched_member['contacts'] = contacts
+                    if 'member_id_html' in enriched_member:
+                        del enriched_member['member_id_html']
+                    return enriched_member
                 except Exception as e:
                     print(f'Error fetching profile details: {e}')
+                    return None
             else:
                 print('Could not extract profile URL.')
+                return None
         else:
             print('No profile link found for this member.')
+            return None
 
     async def _get_addresses(self, page, member_id):
         try:
@@ -342,31 +324,35 @@ class RanchScraperCLI:
             print(f'Error getting contacts: {e}')
             return []
 
-    async def _view_single_member_detail(self, data, page):
+    async def _view_single_member_detail(self, data: List[Dict[str, str]], page: Page) -> List[Dict[str, str]]:
         while True:
             try:
                 choice = input(f"\nEnter member number (1-{len(data)}) or 'q' to quit: ").strip()
                 if choice.lower() == 'q':
-                    print('Returning to main menu...')
-                    break
+                    print('Cancelled.')
+                    return data
                 try:
                     member_index = int(choice) - 1
                     if 0 <= member_index < len(data):
                         selected_member = data[member_index]
-                        await self._show_member_detail(selected_member, page)
-                        break
+                        enriched = await self._show_member_detail(selected_member, page)
+                        if enriched:
+                            new_data = data.copy()
+                            new_data[member_index] = enriched
+                            return new_data
+                        return data
                     else:
                         print(f'Invalid choice. Please enter a number between 1 and {len(data)}.')
                 except ValueError:
                     print("Invalid input. Please enter a number or 'q' to quit.")
             except KeyboardInterrupt:
                 print('\nOperation cancelled.')
-                break
+                return data
             except Exception as e:
                 print(f'Error: {e}')
-                break
+                return data
 
-    async def _view_all_members_detail(self, data, page):
+    async def _view_all_members_detail(self, data, page) -> List[Dict[str, str]]:
         print(f'\nFetching details for all {len(data)} members...')
         enriched_results = []
         for i, member in enumerate(data, 1):
@@ -401,12 +387,12 @@ class RanchScraperCLI:
                             del enriched_member['member_id_html']
                         enriched_results.append(enriched_member)
                         print(f"  ✓ Enriched: {profile_details.get('breeder_type', 'N/A')} - {profile_details.get('profile_type', 'N/A')}")
-                        if addresses:
-                            print(f'    Addresses: {len(addresses)} found')
-                        if phones:
-                            print(f'    Phones: {len(phones)} found')
-                        if contacts:
-                            print(f'    Contacts: {len(contacts)} found')
+                        if profile_details.get('addresses'):
+                            print(f'    Addresses: {len(profile_details.get('addresses', []))} found')
+                        if profile_details.get('phones'):
+                            print(f'    Phones: {len(profile_details.get('phones', []))} found')
+                        if profile_details.get('contacts'):
+                            print(f'    Contacts: {len(profile_details.get('contacts', []))} found')
                     except Exception as e:
                         print(f'  ✗ Error: {e}')
                         enriched_member = member.copy()
@@ -420,61 +406,7 @@ class RanchScraperCLI:
                 enriched_results.append(member)
         print(f'\nEnrichment complete. {len(enriched_results)} results processed.')
         print('\n' + self.scraper.format_results(enriched_results))
-        print('\n=== Additional Data Summary ===')
-        total_addresses = sum((len(member.get('addresses', [])) for member in enriched_results))
-        total_phones = sum((len(member.get('phones', [])) for member in enriched_results))
-        total_contacts = sum((len(member.get('contacts', [])) for member in enriched_results))
-        print(f'Total Addresses found: {total_addresses}')
-        print(f'Total Phones found: {total_phones}')
-        print(f'Total Contacts found: {total_contacts}')
-        print('\n=== Detailed Breakdown ===')
-        for i, member in enumerate(enriched_results, 1):
-            member_id = member.get('member_id', 'Unknown')
-            addresses_count = len(member.get('addresses', []))
-            phones_count = len(member.get('phones', []))
-            contacts_count = len(member.get('contacts', []))
-            print(f'{i}. {member_id}: {addresses_count} addresses, {phones_count} phones, {contacts_count} contacts')
-        while True:
-            try:
-                export_choice = input('\nExport enriched results? (y/n): ').strip().lower()
-                if export_choice == 'y':
-                    print('\nExport options:')
-                    print('1. Export to CSV')
-                    print('2. Export to JSON')
-                    print('3. Skip export')
-                    export_option = input('Enter your choice (1-3): ').strip()
-                    if export_option == '1':
-                        filename = input("Enter CSV filename (or press Enter for 'ranch_results_enriched.csv'): ").strip()
-                        if not filename:
-                            filename = 'ranch_results_enriched.csv'
-                        exported_file = self.exporter.export_to_csv(enriched_results, filename)
-                        if exported_file:
-                            print(f'Enriched results exported to: {exported_file}')
-                        break
-                    elif export_option == '2':
-                        filename = input("Enter JSON filename (or press Enter for 'ranch_results_enriched.json'): ").strip()
-                        if not filename:
-                            filename = 'ranch_results_enriched.json'
-                        exported_file = self.exporter.export_to_json(enriched_results, filename)
-                        if exported_file:
-                            print(f'Enriched results exported to: {exported_file}')
-                        break
-                    elif export_option == '3':
-                        print('Export skipped.')
-                        break
-                    else:
-                        print('Invalid choice. Please enter 1, 2, or 3.')
-                elif export_choice == 'n':
-                    print('Export skipped.')
-                    break
-                else:
-                    print("Invalid choice. Please enter 'y' or 'n'.")
-            except KeyboardInterrupt:
-                print('\nOperation cancelled.')
-                break
-            except Exception as e:
-                print(f'Error: {e}')
-                break
+        return enriched_results
 
 async def main():
     cli = RanchScraperCLI()
