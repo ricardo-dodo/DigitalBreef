@@ -4,6 +4,7 @@ from typing import Optional
 from playwright.async_api import async_playwright, Browser, Page
 from ranch_scraper.cli import RanchScraperCLI
 from epd_scraper.cli import EPDSearchCLI
+from animal_scraper.cli import AnimalSearchCLI
 
 class DigitalBeefScraper:
 
@@ -39,7 +40,7 @@ class DigitalBeefScraper:
         print('What would you like to do?')
         print('1. Ranch Search')
         print('2. EPD Search')
-        print('3. Animal Search (coming soon)')
+        print('3. Animal Search')
         print('4. Exit')
         print('=' * 50)
 
@@ -72,9 +73,11 @@ class DigitalBeefScraper:
 
     async def run_animal_search(self):
         print('\n=== Animal Search ===')
-        print('Animal Search coming soon...')
-        print('This feature will be implemented in a future update.')
-        input('Press Enter to continue...')
+        try:
+            cli = AnimalSearchCLI()
+            await cli.main_with_page(self.page)
+        except Exception as e:
+            print(f'Error in animal search: {e}')
 
     async def cleanup(self):
         try:

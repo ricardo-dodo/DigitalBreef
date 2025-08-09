@@ -64,7 +64,7 @@ def format_table_output(data: List[Dict[str, str]], max_width: int=80) -> str:
     if not data:
         return 'No data to display'
     headers = list(data[0].keys())
-    display_headers = [h for h in headers if h not in ['member_id_html', 'addresses', 'phones', 'contacts']]
+    display_headers = [h for h in headers if h not in ['member_id_html', 'addresses', 'phones', 'contacts', 'registration_url']]
     col_widths = {}
     for header in display_headers:
         max_width_for_col = len(header)
