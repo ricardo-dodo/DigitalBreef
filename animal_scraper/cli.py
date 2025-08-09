@@ -49,6 +49,10 @@ class AnimalSearchCLI:
 
     async def main_with_page(self, page: Page):
         try:
+            # Always navigate to the site to ensure fresh state when re-entering from menu
+            if not await self.scraper.navigate_to_site(page):
+                print('Failed to load Digital Beef website')
+                return
             if not await self.scraper.wait_for_form_ready(page):
                 print('Failed to load Animal search form')
                 return
