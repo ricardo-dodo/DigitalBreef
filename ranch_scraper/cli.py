@@ -7,6 +7,10 @@ from .scraper import DynamicScraper
 from .exporter import DynamicExporter
 from .utils import validate_search_params, parse_location_input, sanitize_filename
 
+# semantic imports
+from nlp.query_parser import classify_intent, parse_query_for_ranch
+from nlp.summarizer import summarize_ranch_results
+
 class RanchScraperCLI:
 
     def __init__(self):
@@ -24,6 +28,11 @@ class RanchScraperCLI:
         parser.add_argument('--output', help='Output filename')
         parser.add_argument('--list-locations', action='store_true', help='List available locations')
         parser.add_argument('--form-info', action='store_true', help='Show form structure information')
+        # semantic
+        parser.add_argument('--semantic', action='store_true', help='Enable natural-language parsing')
+        parser.add_argument('--query', help='Natural-language query for semantic parsing')
+        parser.add_argument('--explain', action='store_true', help='Show parsed parameters before executing')
+        parser.add_argument('--summary', action='store_true', help='Show summary of results after search')
         return parser.parse_args()
 
     def get_search_params_from_args(self, args: argparse.Namespace) -> Dict[str, str]:
@@ -38,6 +47,13 @@ class RanchScraperCLI:
             params['member_id'] = args.member_id.strip()
         if args.location:
             params['location'] = args.location.strip()
+        # semantic route
+        if args.semantic and args.query:
+            intent = classify_intent(args.query)
+            if intent != 'ranch':
+                print(f"Note: Parsed intent='{intent}', but running ranch search. Using ranch params only.")
+            semantic_params = parse_query_for_ranch(args.query)
+            params = {**params, **semantic_params}
         return params
 
     async def get_available_locations(self) -> List[Dict[str, str]]:
@@ -104,13 +120,20 @@ class RanchScraperCLI:
         except Exception as e:
             print(f'Error getting form info: {e}')
 
-    async def run_scraper(self, search_params: Dict[str, str], export_format: Optional[str]=None, output_filename: Optional[str]=None):
+    async def run_scraper(self, search_params: Dict[str, str], export_format: Optional[str]=None, output_filename: Optional[str]=None, show_summary: bool=False, explain: bool=False):
+        if explain:
+            print('\nParsed parameters:')
+            for k, v in search_params.items():
+                print(f'  - {k}: {v}')
         print(f'\nSearching with parameters: {search_params}')
         results = await self.scraper.scrape_ranches(search_params)
         if not results:
             print('No results found')
             return
         print('\n' + self.scraper.format_results(results))
+        if show_summary:
+            print('\nSummary:')
+            print(summarize_ranch_results(results))
         if export_format:
             if output_filename:
                 exported_file = self.exporter.export_data(results, export_format, output_filename)
@@ -136,7 +159,7 @@ class RanchScraperCLI:
             print('\nUse --help for usage information')
             print('Run without arguments for interactive mode')
             sys.exit(1)
-        await self.run_scraper(search_params, args.export, args.output)
+        await self.run_scraper(search_params, args.export, args.output, show_summary=args.summary, explain=args.explain)
 
     async def main_with_page(self, page: Page):
         try:
@@ -388,11 +411,11 @@ class RanchScraperCLI:
                         enriched_results.append(enriched_member)
                         print(f"  ✓ Enriched: {profile_details.get('breeder_type', 'N/A')} - {profile_details.get('profile_type', 'N/A')}")
                         if profile_details.get('addresses'):
-                            print(f'    Addresses: {len(profile_details.get('addresses', []))} found')
+                            print(f"    Addresses: {len(profile_details.get('addresses', []))} found")
                         if profile_details.get('phones'):
-                            print(f'    Phones: {len(profile_details.get('phones', []))} found')
+                            print(f"    Phones: {len(profile_details.get('phones', []))} found")
                         if profile_details.get('contacts'):
-                            print(f'    Contacts: {len(profile_details.get('contacts', []))} found')
+                            print(f"    Contacts: {len(profile_details.get('contacts', []))} found")
                     except Exception as e:
                         print(f'  ✗ Error: {e}')
                         enriched_member = member.copy()

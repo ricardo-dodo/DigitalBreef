@@ -4,6 +4,10 @@ from playwright.async_api import Page
 from .scraper import EPDSearchScraper
 from ranch_scraper.exporter import DynamicExporter
 
+# semantic imports
+from nlp.query_parser import classify_intent, parse_query_for_epd
+from nlp.summarizer import summarize_epd_results
+
 class EPDSearchCLI:
 
     def __init__(self):
@@ -144,7 +148,24 @@ class EPDSearchCLI:
             if not await self.scraper.wait_for_epd_form_ready(page):
                 print('Failed to load EPD search form')
                 return
-            params = await self.collect_epd_parameters(page)
+            # semantic quick entry: let users type a query
+            try:
+                use_quick = input('Type a search in your own words? (y/N): ').strip().lower() == 'y'
+            except Exception:
+                use_quick = False
+            params: Dict[str, str] = {}
+            if use_quick:
+                q = input('Describe what you’re looking for: ').strip()
+                if q:
+                    intent = classify_intent(q)
+                    if intent != 'epd':
+                        pass
+                    params = parse_query_for_epd(q)
+                    print('Okay, I’ll search for:')
+                    for k, v in params.items():
+                        print(f'  - {k}: {v}')
+            if not params:
+                params = await self.collect_epd_parameters(page)
             if not params:
                 print('No search parameters provided. Exiting.')
                 return
@@ -161,6 +182,13 @@ class EPDSearchCLI:
             else:
                 formatted_results = self.scraper.format_results(results)
             print('\n' + formatted_results)
+            # summary option
+            try:
+                if input('Show summary? (y/N): ').strip().lower() == 'y':
+                    print('\nSummary:')
+                    print(summarize_epd_results(results))
+            except Exception:
+                pass
             await self._show_follow_up_menu(page, results)
         except Exception as e:
             print(f'Error in EPD scraper: {e}')

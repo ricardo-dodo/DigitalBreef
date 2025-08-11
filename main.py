@@ -115,6 +115,11 @@ class DigitalBeefScraper:
 
     async def run(self):
         try:
+            # Fast path: if CLI args are provided, use ranch CLI (supports --semantic/--query) and skip menu
+            if len(sys.argv) > 1:
+                cli = RanchScraperCLI()
+                await cli.main()
+                return
             if not await self.init_browser():
                 print('Failed to initialize browser. Exiting.')
                 return

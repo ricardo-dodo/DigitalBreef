@@ -4,6 +4,10 @@ from playwright.async_api import Page
 from .scraper import AnimalSearchScraper
 from ranch_scraper.exporter import DynamicExporter
 
+# semantic imports
+from nlp.query_parser import classify_intent, parse_query_for_animal
+from nlp.summarizer import summarize_animal_results
+
 class AnimalSearchCLI:
 
     def __init__(self):
@@ -56,15 +60,38 @@ class AnimalSearchCLI:
             if not await self.scraper.wait_for_form_ready(page):
                 print('Failed to load Animal search form')
                 return
-            sex = self._prompt_sex()
-            field = self._prompt_field()
-            value = self._prompt_value()
-            params: Dict[str, str] = {'sex': sex, 'field': field, 'value': value}
+            # semantic quick entry
+            try:
+                use_quick = input('Type a search in your own words? (y/N): ').strip().lower() == 'y'
+            except Exception:
+                use_quick = False
+            params: Dict[str, str] = {}
+            if use_quick:
+                q = input('Describe what you’re looking for: ').strip()
+                if q:
+                    intent = classify_intent(q)
+                    if intent != 'animal':
+                        pass
+                    params = parse_query_for_animal(q)
+                    print('Okay, I’ll search for:')
+                    for k, v in params.items():
+                        print(f'  - {k}: {v}')
+            if not params:
+                sex = self._prompt_sex()
+                field = self._prompt_field()
+                value = self._prompt_value()
+                params = {'sex': sex, 'field': field, 'value': value}
             results = await self.scraper.scrape_animals(params)
             if not results:
                 print('No animal results found')
                 return
             print('\n' + self.scraper.format_results(results))
+            try:
+                if input('Show summary? (y/N): ').strip().lower() == 'y':
+                    print('\nSummary:')
+                    print(summarize_animal_results(results))
+            except Exception:
+                pass
             await self._show_follow_up_menu(page, results)
         except Exception as e:
             print(f'Error in Animal scraper: {e}')
